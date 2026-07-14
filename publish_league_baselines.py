@@ -2,13 +2,13 @@
 publish_league_baselines.py — capture the league-average baselines into Neon so the
 website can color every metric (tables and zone maps) against league.
 
-Sources (five tabs), landing in two tables (see league_baseline_schema.sql):
+Sources landing in two tables (see league_baseline_schema.sql):
   Per-pitch  -> league_pitch_baseline  (metric, pitch, vs_hand, rate, n)
-     League_CSW_Baselines / League_SwStr_Baselines / League_PutAway_Baselines
-     shape: A=Pitch, B=vL_*, C=vR_*, D=vL_N, E=vR_N
+     csw/swstr/putaway/whiff/chase from the simple 5-col League_*_Baselines tabs,
+     plus iso + xwoba from the multi-column League_Outcome_Baselines tab.
+     (OPS has no league baseline tab, so OPS stays uncolored on the site.)
   Location   -> league_loc_baseline    (metric, family, region, throws, rate, fam_overall_rate, n)
      League_SwStr_Loc_Baselines / League_PutAway_Loc_Baselines
-     shape: A=Family, B=Region, C=Throws, D=rate, E=N, F=FamOverall
 
 These barely change, so run this on a slow cadence (e.g. weekly), not per slate.
 Rows with zero sample (e.g. the dead 'SW' pitch row) are skipped.
@@ -33,11 +33,15 @@ from db import fetch, execute, get_conn
 CREDS_PATH = os.environ.get("KSPLIT_CREDS_PATH", r"C:\KSplit\credentials.json")
 SHEET_NAME = "KSplit V1.0 2026 SZN"
 
-PITCH_TABS = {                                  # tab -> metric
+PITCH_TABS = {                                  # tab -> metric (simple A=Pitch,B=vL,C=vR,D=vLN,E=vRN shape)
     "League_CSW_Baselines":     "csw",
     "League_SwStr_Baselines":   "swstr",
     "League_PutAway_Baselines": "putaway",
+    "League_Whiff_Baselines":   "whiff",
+    "League_Chase_Baselines":   "chase",
 }
+# ISO lives in the multi-column League_Outcome_Baselines tab, handled separately.
+OUTCOME_TAB = "League_Outcome_Baselines"
 LOC_TABS = {                                    # tab -> metric
     "League_SwStr_Loc_Baselines":   "swstr",
     "League_PutAway_Loc_Baselines": "putaway",
@@ -64,7 +68,9 @@ def connect():
 
 
 def load_pitch(sh):
-    """Rows for league_pitch_baseline. One row per (metric, pitch, vs_hand)."""
+    """Rows for league_pitch_baseline. One row per (metric, pitch, vs_hand).
+    Covers the simple 5-col tabs (csw/swstr/putaway/whiff/chase) plus ISO and
+    xwOBA pulled from the multi-column League_Outcome_Baselines tab."""
     rows = []
     for tab, metric in PITCH_TABS.items():
         grid = sh.worksheet(tab).get_all_values()
@@ -76,6 +82,25 @@ def load_pitch(sh):
                 rate = numf(r[ri]) if len(r) > ri else None
                 n    = numf(r[ni]) if len(r) > ni else None
                 if rate is None or not n:         # skip missing and zero-sample (dead SW row)
+                    continue
+                rows.append((metric, pitch, hand, rate, int(n)))
+
+    # ISO + xwOBA from League_Outcome_Baselines (0-based col indexes):
+    #   A0 Pitch | F5 vL_ISO G6 N | H7 vR_ISO I8 N | J9 vL_xwOBA K10 N | L11 vR_xwOBA M12 N
+    outcome_map = {
+        "iso":   {"L": (5, 6),  "R": (7, 8)},
+        "xwoba": {"L": (9, 10), "R": (11, 12)},
+    }
+    grid = sh.worksheet(OUTCOME_TAB).get_all_values()
+    for r in grid[1:]:
+        pitch = (r[0].strip().upper() if len(r) > 0 else "")
+        if not pitch:
+            continue
+        for metric, hands in outcome_map.items():
+            for hand, (ri, ni) in hands.items():
+                rate = numf(r[ri]) if len(r) > ri else None
+                n    = numf(r[ni]) if len(r) > ni else None
+                if rate is None or not n:
                     continue
                 rows.append((metric, pitch, hand, rate, int(n)))
     return rows
