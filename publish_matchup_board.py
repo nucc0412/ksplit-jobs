@@ -168,6 +168,38 @@ READ_COLS = {"M": "hitter", "N": "best_k_pitch", "O": "use", "P": "k_edge",
              "U": "putaway_vlg", "V": "xwoba_vlg", "W": "tag"}
 
 
+PITCH_FAMILY = {                       # same mapping the zone job uses
+    "FF": "FB", "SI": "FB", "FC": "FB",
+    "CH": "OS", "FS": "OS",
+    "SL": "BR", "ST": "BR", "CU": "BR", "KC": "BR", "SV": "BR",
+}
+
+
+def family_weights(arsenal):
+    """Roll per-pitch arsenal usage up to FB/BR/OS fractions, per batter hand.
+    Returns {'L': {'FB':x,'BR':y,'OS':z}, 'R': {...}} normalized to sum 1 per hand.
+    These are the weights the site uses to blend the hitter 'All families' map the
+    same way the card does (usage-weighted vs the pitcher's arsenal)."""
+    def f(v):                                   # usage cell -> float, 0 if non-numeric
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0.0
+    out = {"L": {"FB": 0.0, "BR": 0.0, "OS": 0.0},
+           "R": {"FB": 0.0, "BR": 0.0, "OS": 0.0}}
+    for a in arsenal:
+        fam = PITCH_FAMILY.get((a.get("pitch") or "").strip().upper())
+        if not fam:
+            continue
+        out["L"][fam] += f(a.get("use_vL"))
+        out["R"][fam] += f(a.get("use_vR"))
+    for hand in ("L", "R"):
+        tot = sum(out[hand].values())
+        if tot:
+            out[hand] = {fam: v / tot for fam, v in out[hand].items()}
+    return out
+
+
 def read_board(ws):
     """Read the currently-displayed board (three sections + summary)."""
     vals = ws.get_all_values()
@@ -189,6 +221,7 @@ def read_board(ws):
                "toughest": cell(TOUGH_CELL)}
     return {"lineup": lineup, "arsenal": arsenal, "detail": detail,
             "lineup_read": read, "summary": summary,
+            "family_weights": family_weights(arsenal),
             "generated_at": datetime.now().isoformat()}
 
 
