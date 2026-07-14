@@ -1,0 +1,9 @@
+# Never commit secrets — these live in GitHub Actions secrets, not the repo
+.env
+credentials.json
+*.json.key
+
+# Python
+__pycache__/
+*.pyc
+.venv/
