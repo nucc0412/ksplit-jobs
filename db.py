@@ -4,7 +4,7 @@ db.py — shared Neon Postgres connector for all KSplit scripts.
 Reads DATABASE_URL from C:/KSplit/.env. Import this everywhere; never
 hardcode the connection string.
 
-    from db import get_conn, upsert_rows, fetch
+    from db import get_conn, upsert_rows, fetch, execute
 
 Setup (once):
     pip install psycopg[binary] python-dotenv
@@ -98,6 +98,20 @@ def fetch(sql, params=None):
             cur.execute(sql, params or ())
             cols = [d[0] for d in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+
+def execute(sql, params=None):
+    """Run a write statement that returns no rows (DELETE/UPDATE/INSERT/DDL).
+    Commits via get_conn(). Returns the affected row count.
+
+    Use this instead of fetch() for anything that doesn't SELECT: fetch() reads
+    cur.description/fetchall(), which are empty on a write and raise, and because
+    get_conn() rolls back on any exception the write would silently not commit.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params or ())
+            return cur.rowcount
 
 
 if __name__ == "__main__":
