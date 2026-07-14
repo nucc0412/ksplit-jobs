@@ -214,7 +214,7 @@ def read_board(ws):
     lineup = _rows(vals, 7, 15, LINEUP_COLS)
     arsenal = [a for a in _rows(vals, 20, 30, ARSENAL_COLS)
                if (a.get("use_vR") or 0) or (a.get("use_vL") or 0)]   # drop 0-usage pitches
-    detail = _rows(vals, 33, 60, DETAIL_COLS)
+    detail = _rows(vals, 33, 130, DETAIL_COLS)   # 9 hitters x up to ~10 pitches; empty rows are skipped
     read = _rows(vals, 33, 41, READ_COLS)
     summary = {"lineup_status": cell(STATUS_CELL),
                "most_vulnerable": cell(VULN_CELL),
