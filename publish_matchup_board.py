@@ -60,6 +60,10 @@ RM_TAB     = "Research_Matchup"
 
 SIM_PITCHER_COL = 2    # B  pitcher name
 SIM_KEY_COL     = 99   # CU normalized pitcher key
+SIM_KVL_COL     = 5    # E  Pitcher K% vs LHB (raw; NOT kADJ)
+SIM_KVR_COL     = 6    # F  Pitcher K% vs RHB (raw; NOT kADJ)
+SIM_H1_NAME_COL = 11   # K  Hitter1 Name  (nine names run K..S = 11..19)
+SIM_H1_KPCT_COL = 29   # AC H1 K% vs Pitcher (nine run AC..AK = 29..37), raw hitter K%
 
 NAME_CELL   = "B3"   # driver 1: pitcher DISPLAY NAME (drives lineup section)
 KEY_CELL    = "B5"   # driver 2: lowercased name, LOWER(TRIM(B3)) form (arsenal + detail lookups)
@@ -115,7 +119,11 @@ def connect():
 
 
 def slate_pitchers(sh):
-    """(display_name, key) for every pitcher on today's Sim sheet."""
+    """(display_name, key, k_vs_L, k_vs_R, hitter_k) for every pitcher on the Sim sheet.
+    Pitcher K% are the RAW rates vs each batter hand (cols E/F). hitter_k is a
+    {normalized_hitter_name: raw_k_pct} map built from the nine hitter names (K..S)
+    paired with their K% vs this pitcher (AC..AK). We pull ONLY raw K% values, never
+    kADJ or any model-internal columns."""
     ws = sh.worksheet(SIM_TAB)
     grid = ws.get_all_values()
     out = []
@@ -127,7 +135,17 @@ def slate_pitchers(sh):
             continue
         key = (row[SIM_KEY_COL - 1].strip() if len(row) >= SIM_KEY_COL and row[SIM_KEY_COL - 1]
                else name).strip()
-        out.append((name, norm_key(key)))
+        k_vL = row[SIM_KVL_COL - 1].strip() if len(row) >= SIM_KVL_COL else ""
+        k_vR = row[SIM_KVR_COL - 1].strip() if len(row) >= SIM_KVR_COL else ""
+        hitter_k = {}
+        for j in range(9):
+            ni = SIM_H1_NAME_COL - 1 + j
+            ki = SIM_H1_KPCT_COL - 1 + j
+            hname = row[ni].strip() if ni < len(row) else ""
+            if not hname:
+                continue
+            hitter_k[norm_key(hname)] = num(row[ki].strip() if ki < len(row) else "")
+        out.append((name, norm_key(key), num(k_vL), num(k_vR), hitter_k))
     return out
 
 
@@ -282,14 +300,14 @@ def main():
     slate = slate_pitchers(sh)
     if args.only:
         want = norm_key(args.only)
-        slate = [(n, k) for (n, k) in slate if k == want or norm_key(n) == want]
+        slate = [t for t in slate if t[1] == want or norm_key(t[0]) == want]
         if not slate:
             print(f"'{args.only}' not on today's slate."); return
 
     print(f"Publishing {len(slate)} matchup board(s) for {date.today()} ...")
     today = date.today().isoformat()
     rows, skipped = [], []
-    for i, (name, key) in enumerate(slate, 1):
+    for i, (name, key, k_vL, k_vR, hitter_k) in enumerate(slate, 1):
         ok, disp, hand = set_and_wait(ws, name)   # write B3+B5, verify B3 == name we wrote
         if not ok:
             print(f"  [{i}/{len(slate)}] {name}: board did not switch (got '{disp}') — SKIPPED")
@@ -298,6 +316,10 @@ def main():
         if not board["arsenal"]:
             print(f"  [{i}/{len(slate)}] {disp}: arsenal empty after recalc — SKIPPED (nothing written)")
             skipped.append(disp); continue
+        board["summary"]["k_pct_vL"] = k_vL       # raw K% vs LHB (not kADJ)
+        board["summary"]["k_pct_vR"] = k_vR       # raw K% vs RHB (not kADJ)
+        for lr in board["lineup_read"]:           # attach each hitter's raw K% vs pitcher
+            lr["raw_k_pct"] = hitter_k.get(norm_key(lr.get("hitter") or ""))
         rows.append((key, disp, hand or None, today, json.dumps(board)))
         n_line = len(board["lineup"]); n_ars = len(board["arsenal"])
         print(f"  [{i}/{len(slate)}] {disp} ({hand}) — lineup {n_line}, arsenal {n_ars}, "
