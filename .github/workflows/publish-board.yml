@@ -40,3 +40,9 @@ jobs:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python publish_matchup_board.py --write
+
+      - name: Publish zone maps
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python publish_matchup_zones.py --write
