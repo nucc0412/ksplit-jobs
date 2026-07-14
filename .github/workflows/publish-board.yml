@@ -1,23 +1,23 @@
 name: Publish Matchup Board
- 
+
 # Runs the board publisher in GitHub's cloud on a schedule, so it works whether
-# or not your laptop is on. It reads the Google Sheet, upserts Neon, and uploads
-# the board JSON to Supabase for the website.
+# or not your laptop is on. It reads the Google Sheet and upserts the boards into
+# Neon (matchup_board), which the website reads directly.
 #
 # Times are UTC. It's currently EDT (UTC-4), so this covers ~10:00 AM to ~11:59 PM
 # Eastern, every 30 minutes. Adjust the cron below to match your slate window.
 # (If you're on EST in winter, UTC-5, shift the ranges by one hour.)
- 
+
 on:
   schedule:
     - cron: "*/30 14-23,0-3 * * *"   # every 30 min, ~10am-midnight ET
   workflow_dispatch: {}               # adds a manual "Run workflow" button for testing
- 
+
 # Never let two publishes overlap (each run drives B3 on the sheet for ~3 min).
 concurrency:
   group: publish-matchup-board
   cancel-in-progress: false
- 
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -25,20 +25,18 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
- 
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
- 
+
       - name: Install dependencies
         run: pip install -r requirements.txt
- 
+
       - name: Publish board
         env:
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python publish_matchup_board.py --write
