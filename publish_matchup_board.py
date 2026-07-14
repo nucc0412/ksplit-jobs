@@ -18,26 +18,22 @@ never reach Neon.
 
 Slate source: the pitchers in 'Pitcher K Sim' col B (names) / CU (normalized key).
 
-After the Neon write succeeds, the same boards are shaped for the website and
-uploaded to Supabase Storage (bucket 'ksplit-data') as JSON:
-    matchup-boards/latest.json           overwritten every full-slate run
-    matchup-boards/archive/YYYY-MM-DD.json  dated copy, mirrors the CSV archives
-latest.json is keyed by pitcher_key for the site's search bar:
-    {slate_date, generated_at, pitchers:[{key,name,hand}], boards:{key: {...}}}
-The website reads that file (and the read-only Neon role); it never recomputes.
+Output: one row per pitcher in Neon table matchup_board, keyed on
+(pitcher_key, slate_date), columns pitcher_key, pitcher_name, pitcher_hand,
+slate_date, board (jsonb). The website reads these rows directly from Neon with a
+read-only role and never recomputes anything. The search bar queries the light
+list (pitcher_key, pitcher_name, pitcher_hand for today) and loads one pitcher's
+board on selection.
 
-The Supabase upload needs two secrets in C:\\KSplit\\.env (NOT in the site repo):
-    SUPABASE_URL=https://<project>.supabase.co
-    SUPABASE_SERVICE_ROLE_KEY=<service role key from Cloudflare / Supabase>
-If they are missing, the Neon write still happens and the upload is skipped with
-a warning. A --only run skips the upload so it can't clobber the full slate.
+A board whose arsenal is still empty after recalc is SKIPPED and never written, so
+an empty board can never reach Neon.
 
 Run (once lineups are set, before you're working in the sheet):
     python publish_matchup_board.py            # dry run: build + preview, no write
-    python publish_matchup_board.py --write     # write to Neon + upload to Supabase
-    python publish_matchup_board.py --write --only "paul skenes"   # Neon only, one pitcher
+    python publish_matchup_board.py --write     # write to Neon
+    python publish_matchup_board.py --write --only "paul skenes"   # one pitcher
 
-Requires: gspread, google-auth, requests, psycopg[binary], python-dotenv (db.py).
+Requires: gspread, google-auth, psycopg[binary], python-dotenv (db.py).
 """
 
 import argparse
@@ -50,7 +46,6 @@ import unicodedata
 from datetime import date, datetime
 
 import gspread
-import requests
 from google.oauth2.service_account import Credentials
 
 from db import upsert_rows, fetch
@@ -76,13 +71,6 @@ TOUGH_CELL  = "N47"  # toughest
 RECALC_WAIT   = 3.0    # seconds to let Google recompute after writing B3/B5
 RECALC_TRIES  = 8      # re-check B3/B5 until both match the requested pitcher
 ARSENAL_TRIES = 3      # extra reads of the board while the arsenal block populates
-
-# --- Supabase Storage (website read source) ---------------------------------
-# Both come from C:\KSplit\.env (loaded by db.py). Never put these in the site repo.
-SUPABASE_URL    = os.environ.get("SUPABASE_URL", "").rstrip("/")
-SUPABASE_KEY    = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-SUPABASE_BUCKET = "ksplit-data"      # same bucket the site's CSVs live in
-BOARD_PREFIX    = "matchup-boards"   # latest.json + archive/YYYY-MM-DD.json land here
 # =============================================================================
 
 
@@ -250,62 +238,6 @@ def set_and_wait(ws, display_name):
     return False, got_name, ""
 
 
-def build_site_payload(rows, slate_date):
-    """Shape the built rows into the website's search-bar JSON.
-    `pitchers` is the light list the search box filters (partial name match);
-    `boards` is keyed by pitcher_key so a resolved name looks up in one hop.
-    rows tuples are (key, name, hand, slate_date, board_json)."""
-    pitchers, boards = [], {}
-    for key, name, hand, _d, board_json in rows:
-        pitchers.append({"key": key, "name": name, "hand": hand})
-        boards[key] = json.loads(board_json)
-    pitchers.sort(key=lambda p: p["name"].lower())
-    return {"slate_date": slate_date,
-            "generated_at": datetime.now().isoformat(),
-            "pitchers": pitchers,
-            "boards": boards}
-
-
-def upload_supabase(path, payload):
-    """PUT one JSON object to Supabase Storage at bucket/path, overwriting if it
-    exists. Returns the byte size written. Raises on HTTP error."""
-    url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_BUCKET}/{path}"
-    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    headers = {
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "x-upsert": "true",          # create or overwrite
-        "cache-control": "max-age=60",
-    }
-    resp = requests.post(url, data=body, headers=headers, timeout=30)
-    resp.raise_for_status()
-    return len(body)
-
-
-def publish_to_site(rows, slate_date, is_only):
-    """Upload latest.json (+ dated archive) to Supabase after the Neon write.
-    Skipped for --only runs (so one pitcher can't clobber the full slate) and when
-    the Supabase secrets are absent. Never raises: a failed upload warns and leaves
-    Neon as the source of truth to retry against."""
-    if is_only:
-        print("  (--only run: skipped website upload so it can't clobber the full-slate latest.json)")
-        return
-    if not (SUPABASE_URL and SUPABASE_KEY):
-        print("  WARNING: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set in C:\\KSplit\\.env — "
-              "website upload skipped.\n"
-              "  Neon is updated; the site won't see new boards until you add those two vars and re-run.")
-        return
-    payload = build_site_payload(rows, slate_date)
-    try:
-        sz = upload_supabase(f"{BOARD_PREFIX}/latest.json", payload)
-        print(f"  uploaded {BOARD_PREFIX}/latest.json ({sz} bytes, {len(payload['pitchers'])} pitchers)")
-        asz = upload_supabase(f"{BOARD_PREFIX}/archive/{slate_date}.json", payload)
-        print(f"  uploaded {BOARD_PREFIX}/archive/{slate_date}.json ({asz} bytes)")
-    except Exception as e:
-        print(f"  WARNING: Supabase upload failed: {e}\n"
-              f"  Neon is updated; re-run to retry the website upload.", file=sys.stderr)
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--write", action="store_true")
@@ -358,8 +290,6 @@ def main():
     print(f"\n  upserted {n} boards to matchup_board" + (f" ({len(skipped)} skipped: {skipped})" if skipped else ""))
     chk = fetch("SELECT count(*) c FROM matchup_board WHERE slate_date=%s", (today,))
     print(f"  matchup_board now holds {chk[0]['c']} boards for {today}")
-
-    publish_to_site(rows, today, bool(args.only))
     print("Done.")
 
 
