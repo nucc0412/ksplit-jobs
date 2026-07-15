@@ -1,5 +1,5 @@
 """
-publish_league_baselines.py — capture the league-average baselines into Neon so the
+publish_league_baselines.py: capture the league-average baselines into Neon so the
 website can color every metric (tables and zone maps) against league.
 
 Sources landing in two tables (see league_baseline_schema.sql):
@@ -149,7 +149,7 @@ def main():
     print(f"Built {len(pitch)} per-pitch baseline rows, {len(loc)} location baseline rows.")
 
     if not args.write:
-        print("DRY RUN — re-run with --write.")
+        print("DRY RUN, re-run with --write.")
         if pitch:
             print("  sample pitch:", pitch[0])
         if loc:
