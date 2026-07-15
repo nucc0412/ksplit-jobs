@@ -1,5 +1,5 @@
 """
-publish_matchup_board.py — read the Research_Matchup board for each pitcher on
+publish_matchup_board.py: read the Research_Matchup board for each pitcher on
 today's slate and publish it to Neon (matchup_board) as JSON for the website.
 
 How it works: Research_Matchup shows ONE pitcher at a time. It is driven by TWO
@@ -48,7 +48,7 @@ from datetime import date, datetime
 import gspread
 from google.oauth2.service_account import Credentials
 
-from db import upsert_rows, fetch
+from db import upsert_rows, fetch, execute
 
 # ============================== CONFIG ========================================
 # CREDS_PATH is used for LOCAL runs. In GitHub Actions we instead pass the whole
@@ -268,7 +268,7 @@ def _first(block):
 def set_and_wait(ws, display_name):
     """Drive the board: write the DISPLAY NAME to B3 and its LOWER(TRIM) form to B5
     together, wait for recalc, then verify B3 reads back the NAME WE JUST WROTE.
-    We verify against norm_key(display_name) — the value we put in B3 — NOT the slate's
+    We verify against norm_key(display_name), the value we put in B3, NOT the slate's
     CU key. Those two normalize differently for some pitchers, and comparing B3 to the
     CU key was failing pitchers whose board had already switched correctly (the clean
     data-ordered cliff mid-slate). B5 is written (it drives arsenal) but not read back;
@@ -311,11 +311,11 @@ def main():
     for i, (name, key, k_vL, k_vR, hitter_k) in enumerate(slate, 1):
         ok, disp, hand = set_and_wait(ws, name)   # write B3+B5, verify B3 == name we wrote
         if not ok:
-            print(f"  [{i}/{len(slate)}] {name}: board did not switch (got '{disp}') — SKIPPED")
+            print(f"  [{i}/{len(slate)}] {name}: board did not switch (got '{disp}'), SKIPPED")
             skipped.append(name); continue
         board = read_board_ready(ws)
         if not board["arsenal"]:
-            print(f"  [{i}/{len(slate)}] {disp}: arsenal empty after recalc — SKIPPED (nothing written)")
+            print(f"  [{i}/{len(slate)}] {disp}: arsenal empty after recalc, SKIPPED (nothing written)")
             skipped.append(disp); continue
         board["summary"]["k_pct_vL"] = k_vL       # raw K% vs LHB (not kADJ)
         board["summary"]["k_pct_vR"] = k_vR       # raw K% vs RHB (not kADJ)
@@ -323,11 +323,11 @@ def main():
             lr["raw_k_pct"] = hitter_k.get(norm_key(lr.get("hitter") or ""))
         rows.append((key, disp, hand or None, today, json.dumps(board)))
         n_line = len(board["lineup"]); n_ars = len(board["arsenal"])
-        print(f"  [{i}/{len(slate)}] {disp} ({hand}) — lineup {n_line}, arsenal {n_ars}, "
+        print(f"  [{i}/{len(slate)}] {disp} ({hand}), lineup {n_line}, arsenal {n_ars}, "
               f"status {board['summary']['lineup_status']}")
 
     if not args.write:
-        print(f"\nDRY RUN — built {len(rows)} boards ({len(skipped)} skipped). Re-run with --write.")
+        print(f"\nDRY RUN, built {len(rows)} boards ({len(skipped)} skipped). Re-run with --write.")
         if rows:
             sample = json.loads(rows[0][4])
             print("  sample lineup[0]:", sample["lineup"][0] if sample["lineup"] else None)
@@ -335,7 +335,7 @@ def main():
         return
 
     if not rows:
-        print("\nNothing to write — every board was skipped. Neon left untouched.")
+        print("\nNothing to write, every board was skipped. Neon left untouched.")
         return
 
     n = upsert_rows("matchup_board",
@@ -344,6 +344,20 @@ def main():
                     conflict_cols=["pitcher_key", "slate_date"],
                     update_cols=["pitcher_name", "pitcher_hand", "board"])
     print(f"\n  upserted {n} boards to matchup_board" + (f" ({len(skipped)} skipped: {skipped})" if skipped else ""))
+
+    # Drop boards for today that are no longer on the slate. Without this, a slate
+    # that shrank (yesterday's 27 starters, today's 2) leaves the old boards sitting
+    # under the same slate_date and the site shows stale matchups.
+    # Pruned against the SLATE keys, not the keys we just wrote, so a pitcher who was
+    # skipped this run (empty arsenal) keeps whatever good board he already had.
+    # Never prune on an --only run: that would delete the rest of the slate.
+    if not args.only:
+        slate_keys = [t[1] for t in slate]
+        gone = execute("DELETE FROM matchup_board WHERE slate_date=%s AND pitcher_key <> ALL(%s)",
+                       (today, slate_keys))
+        if gone:
+            print(f"  pruned {gone} board(s) no longer on the slate")
+
     chk = fetch("SELECT count(*) c FROM matchup_board WHERE slate_date=%s", (today,))
     print(f"  matchup_board now holds {chk[0]['c']} boards for {today}")
     print("Done.")
