@@ -178,7 +178,8 @@ LINEUP_COLS = {"A": "order", "B": "hitter", "C": "bats", "D": "csw", "E": "swstr
 ARSENAL_COLS = {"A": "pitch", "B": "use_vR", "C": "use_vL", "D": "csw_vR", "E": "csw_vL",
                 "F": "whiff_vR", "G": "whiff_vL", "H": "chase_vR", "I": "chase_vL",
                 "J": "barrel_vR", "K": "barrel_vL", "L": "iso_vR", "M": "iso_vL",
-                "N": "xwoba_vR", "O": "xwoba_vL"}
+                "N": "xwoba_vR", "O": "xwoba_vL",
+                "P": "putaway_vR", "Q": "putaway_vL"}   # appended; site displays them after Whiff%
 DETAIL_COLS = {"A": "hitter", "B": "pitch", "C": "use", "D": "csw", "E": "swstr",
                "F": "whiff", "G": "chase", "H": "putaway", "I": "ops", "J": "iso", "K": "xwoba"}
 READ_COLS = {"M": "hitter", "N": "best_k_pitch", "O": "use", "P": "k_edge",
