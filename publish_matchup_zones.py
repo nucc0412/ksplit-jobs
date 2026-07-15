@@ -1,10 +1,10 @@
 """
-publish_matchup_zones.py — capture the zone-map data for today's slate into Neon
+publish_matchup_zones.py: capture the zone-map data for today's slate into Neon
 (matchup_zone), for the Matchup Board's location maps.
 
 Two sides, one table (see matchup_zone_schema.sql):
-  pitcher side  — from Pitcher_Zone (freq) / _SwStr / _PutAway, keyed by exact pitch.
-  hitter  side  — from Hitter_Zone_{CSW,SwStr,PutAway}_vs_{LHP,RHP}, keyed by family,
+  pitcher side , from Pitcher_Zone (freq) / _SwStr / _PutAway, keyed by exact pitch.
+  hitter  side , from Hitter_Zone_{CSW,SwStr,PutAway}_vs_{LHP,RHP}, keyed by family,
                   filtered to the nine confirmed hitters facing each starter.
 
 Unlike the board publisher this does NOT drive B3/B5: the zone tabs are keyed by
@@ -292,7 +292,7 @@ def main():
               f"(hitter maps skipped for those; pitcher maps still built)")
 
     if not args.write:
-        print("DRY RUN — re-run with --write to upsert into matchup_zone.")
+        print("DRY RUN, re-run with --write to upsert into matchup_zone.")
         if rows:
             print("  sample row:", dict(zip(COLS, rows[0])))
         return
@@ -300,12 +300,22 @@ def main():
     if not rows:
         print("Nothing to write."); return
 
-    # Delete-then-insert: we clear this slate's rows above, so there are no
-    # conflicting rows to update. A plain INSERT avoids needing an ON CONFLICT
+    # Delete-then-insert. A plain INSERT afterward avoids needing an ON CONFLICT
     # target that exactly matches the table's (COALESCE-based) unique index.
-    keys = list({p["key"] for p in slate})
-    execute("DELETE FROM matchup_zone WHERE slate_date=%s AND pitcher_key = ANY(%s)",
-            (today, keys))
+    #
+    # Full-slate run: clear the whole date. We are about to rebuild every pitcher on
+    # the slate, and clearing everything also removes pitchers who have dropped off
+    # the slate since the last run (otherwise their zone rows linger and the site
+    # serves stale maps).
+    # --only run: clear just that pitcher, never the rest of the slate.
+    if args.only:
+        keys = list({p["key"] for p in slate})
+        execute("DELETE FROM matchup_zone WHERE slate_date=%s AND pitcher_key = ANY(%s)",
+                (today, keys))
+    else:
+        gone = execute("DELETE FROM matchup_zone WHERE slate_date=%s", (today,))
+        if gone:
+            print(f"  cleared {gone} existing zone row(s) for {today}")
     n = insert_rows("matchup_zone", COLS, rows)
     print(f"  upserted {n} zone rows into matchup_zone")
     chk = fetch("SELECT count(*) c FROM matchup_zone WHERE slate_date=%s", (today,))
