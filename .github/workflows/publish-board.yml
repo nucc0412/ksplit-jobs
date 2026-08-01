@@ -10,7 +10,7 @@ name: Publish Matchup Board
 
 on:
   schedule:
-    - cron: "*/30 14-23,0-3 * * *"   # every 30 min, ~10am-midnight ET
+    - cron: "*/8 14-23,0-3 * * *"   # every 8 min, ~10am-midnight ET
   workflow_dispatch: {}               # adds a manual "Run workflow" button for testing
 
 # Never let two publishes overlap (each run drives B3 on the sheet for ~3 min).
