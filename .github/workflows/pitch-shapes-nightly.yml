@@ -1,0 +1,47 @@
+name: pitch-shapes-nightly
+
+# Nightly incremental refresh of the pitch-shapes tracker. Pulls the last few
+# days of Statcast, runs the normalize -> aggregate -> rates -> load chain, and
+# upserts new starts into Neon (pitch_shapes table). The /pitch-tracking page
+# reads Neon, so it's fresh the next morning with no manual work.
+#
+# Times are UTC. 13:00 UTC ~ 9am ET, safely after the prior night's west-coast
+# games and Statcast's ingest lag. Adjust the cron if you want it earlier/later.
+on:
+  schedule:
+    - cron: "0 13 * * *"   # 13:00 UTC ~ 9am ET
+  workflow_dispatch: {}     # adds a manual "Run workflow" button for testing
+
+# Never let two nightly runs overlap.
+concurrency:
+  group: pitch-shapes-nightly
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install pybaseball pandas pyarrow numpy psycopg2-binary
+
+      - name: Run incremental pipeline
+        env:
+          # reuses the same write-role Neon secret the board workflow uses.
+          # load_to_neon.py falls back to DATABASE_URL, so no new secret needed.
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          python pull_recent.py
+          python normalize_pitches.py
+          python aggregate_starts.py
+          python compute_rates.py
+          python load_to_neon.py
